@@ -1,0 +1,53 @@
+#! /bin/sh
+# chkconfig: 2345 99 99
+# description: init script for router nginx
+# AUTHOR: Jeff.Rao<chenlin.rao@renren-inc.com>
+# Date: 2013-01-18
+
+# source function library
+. /etc/init.d/functions
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+PROG=<%= node[:nginx][:path] %>/sbin/nginx
+ARGS=-cconf/nginx_router.conf
+NAME=nginx_router
+
+test -x $PROG || exit 0
+
+start() {
+    $PROG $ARGS
+    ps aux|grep nginx_route[r]|awk '{print $2}' > /var/run/$NAME.pid
+    return $?
+}
+stop() {
+    [ -f /var/run/$NAME.pid ] || return 1
+    kill -TERM `cat /var/run/$NAME.pid`
+    return $?
+}
+
+case "$1" in
+  start)
+    echo "Starting: $NAME"
+    start
+    echo $?
+    ;;
+  stop)
+    echo "Stopping: $NAME"
+    stop
+    echo $?
+    ;;
+  restart)
+    stop
+    sleep 1
+    start
+    ;;
+  status)
+    status $NAME && exit 0 || exit $?
+    ;;
+  *)
+    echo "Usage: $NAME {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

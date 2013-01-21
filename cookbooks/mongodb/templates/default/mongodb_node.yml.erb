@@ -1,0 +1,44 @@
+---
+capacity: <%= node[:mongodb_node][:capacity] %>
+plan: free
+local_db: sqlite3:/var/vcap/services/mongodb/mongodb_node.db
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+index: <%= node[:mongodb_node][:index] %>
+base_dir: /var/vcap/services/mongodb/instances
+mongod_log_dir: /var/vcap/services/mongodb/logs
+pid: /var/vcap/sys/run/mongodb_node.pid
+max_memory: <%= node[:mongodb_node][:max_memory] %>
+node_id: <%= "mongodb_node_#{node[:mongodb_node][:index]}" %>
+op_time_limit: <%= node[:mongodb_node][:op_time_limit] %>
+mongo_timeout: <%= node[:mongodb_node][:mongo_timeout] %>
+
+supported_versions: <%= "['#{node[:mongodb][:supported_versions].keys.join("', '")}']"%>
+default_version: "<%= node[:mongodb][:default_version] %>"
+
+mongod_path:
+<%
+  node[:mongodb][:supported_versions].each_key do |version|
+%>
+  "<%= version %>": "<%= File.join(node[:deployment][:home], "deploy", "mongodb", node[:mongodb][:supported_versions][version], "bin", "mongod") %>"
+<% end %>
+
+mongorestore_path:
+<%
+  node[:mongodb][:supported_versions].each_key do |version|
+%>
+  "<%= version %>": "<%= File.join(node[:deployment][:home], "deploy", "mongodb", node[:mongodb][:supported_versions][version], "bin", "mongorestore") %>"
+<% end %>
+
+mongod_options:
+<%
+  node[:mongodb][:supported_versions].each_key do |version|
+%>
+  "<%= version %>": "<%= node[:mongod_options][version] %>"
+<% end %>
+
+port_range:
+  first: 25001
+  last: 45000
+migration_nfs: /mnt/migration
+logging:
+  level: debug

@@ -1,0 +1,81 @@
+#! /bin/sh
+# chkconfig: 2345 99 99
+# description: Start the nats message bus server
+# AUTHOR: Jeff.Rao<chenlin.rao@renren-inc.com>
+# Date: 2013-01-18
+
+# source function library
+. /etc/init.d/functions
+
+PATH=<%= File.join(node[:ruby][:path], "bin") %>:/sbin:/usr/sbin:/bin:/usr/bin
+
+DESC="nats-server"
+NAME=nats-server
+DAEMON_NAME=nats-server
+DAEMON=<%= File.join(node[:ruby][:path], "bin", "nats-server") %>
+DAEMON_ARGS="-d -c <%= node[:nats_server][:config] %>"
+
+PIDFILE=/var/run/nats_server.pid
+SCRIPTNAME=/etc/init.d/$NAME
+
+# Exit if the package is not installed
+[ -x "$DAEMON" ] || exit 0
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+#
+# Function that starts the daemon/service
+#
+do_start()
+{
+    daemon --pidfile=$PIDFILE $DAEMON -- $DAEMON_ARGS
+    RETVAL=$?
+    [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$NAME
+    return $RETVAL
+}
+
+#
+# Function that stops the daemon/service
+#
+do_stop()
+{
+    killproc -p $PIDFILE $DAEMON_NAME
+    RETVAL=$?
+    [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/$NAME
+    return $RETVAL
+}
+
+#
+# Function that sends a SIGHUP to the daemon/service
+#
+do_reload() {
+    killproc -p $PIDFILE $DAEMON_NAME -SIGHUP
+    return $?
+}
+
+case "$1" in
+  start)
+    do_start
+    RETVAL=$?
+    ;;
+  stop)
+    do_stop
+    RETVAL=$?
+    ;;
+  status)
+    status "$NAME" && exit 0 || exit $?
+    RETVAL=$?
+    ;;
+  restart|force-reload)
+    do_stop
+    do_start
+    RETVAL=$?
+    ;;
+  *)
+    echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
+    RETVAL=3
+    ;;
+esac
+
+exit $RETVAL

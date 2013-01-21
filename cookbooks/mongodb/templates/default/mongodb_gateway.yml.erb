@@ -1,0 +1,42 @@
+---
+cloud_controller_uri: <%= node[:cloud_controller][:service_api_uri] %>
+service:
+  name: mongodb
+  version: "1.8"
+  description: 'MongoDB NoSQL store'
+  plans: ['free']
+  default_plan: 'free'
+  tags: ['nosql', 'document']
+  timeout: <%= node[:mongodb_gateway][:service][:timeout] %>
+  supported_versions: <%= "['#{node[:mongodb][:supported_versions].keys.join("', '")}']"%>
+  version_aliases:
+<%
+  node[:mongodb][:version_aliases].each do |a, v|
+%>
+    "<%= a %>": "<%= v %>"
+<% end %>
+
+host: localhost
+index: 0
+token: <%= node[:mongodb_node][:token] %>
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+pid: /var/vcap/sys/run/mongodb_service.pid
+node_timeout: <%= node[:mongodb_gateway][:node_timeout] %>
+logging:
+  level: debug
+<%if node[:service_lifecycle][:enable]%>
+resque:
+  host: <%= node[:redis_resque][:host]%>
+  port: <%= node[:redis_resque][:port]%>
+  password: <%= node[:redis_resque][:password] %>
+  expire: <%= node[:redis_resque][:expire]%>
+download_url_template: "http://service-serialization.<%= node[:deployment][:domain] %>/serialized/%{service}/%{name}/snapshots/%{snapshot_id}?token=%{token}"
+plan_management:
+  plans:
+    free:
+      lifecycle:
+        snapshot:
+          quota: <%= node[:service_lifecycle][:snapshot_quota] || "5" %>
+        serialization: enable
+        job: enable
+<%end%>

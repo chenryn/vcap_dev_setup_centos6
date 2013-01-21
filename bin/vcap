@@ -1,0 +1,361 @@
+#!/usr/bin/env ruby
+# Copyright (c) 2009-2011 VMware, Inc.
+#
+# Usage: bin/vcap_system [start|stop|restart|tail|status] [component ...]
+#
+
+require 'yaml'
+require 'fileutils'
+require 'optparse'
+
+require 'rubygems'
+require 'eventmachine'
+require 'nats/client'
+
+require File.expand_path(File.join("..", "lib", "vcap_components"), File.dirname(__FILE__))
+
+# This is used to bring up and down the NATS messaging server.
+class NatsServer
+
+  attr_reader :was_running
+  alias :was_running? :was_running
+
+  class << self
+    def kill_autostart_server
+      pid ||= File.read(NATS::AUTOSTART_PID_FILE).chomp.to_i
+      %x[kill -9 #{pid}] if pid
+      %x[rm #{NATS::AUTOSTART_PID_FILE}]
+      %x[rm #{NATS::AUTOSTART_LOG_FILE}]
+    end
+  end
+
+  def initialize(uri=NATS::DEFAULT_URI, pid_file=NATS::AUTOSTART_PID_FILE)
+    @uri = URI.parse(uri)
+    @pid_file = pid_file
+  end
+
+  def server_pid
+    @pid ||= File.read(@pid_file).chomp.to_i
+  end
+
+  def start_server
+    if NATS.server_running? @uri
+      @was_running = true
+      return
+    end
+
+    nats_server = `which nats-server`
+    unless $? == 0 && nats_server
+      STDERR.puts "Could not locate a nats-server, exiting.".red
+      exit 1
+    end
+    nats_server.chomp!
+    `#{nats_server} -p #{@uri.port} -P #{@pid_file} -d 2> /dev/null`
+    NATS.wait_for_server(@uri, 5)
+  end
+
+  def is_running?
+    NATS.server_running? @uri
+  end
+
+  def kill_server
+    if File.exists? @pid_file
+      %x[kill -9 #{server_pid} 2> /dev/null]
+      %x[rm #{@pid_file} 2> /dev/null]
+      %x[rm #{NATS::AUTOSTART_LOG_FILE} 2> /dev/null]
+    end
+  end
+end
+
+module Run
+  def self.start_init
+    nats_server = NatsServer.new
+    nats_server.start_server
+  end
+
+  def self.start(args)
+    self.start_init
+    components(args).each(&:start)
+  end
+
+  def self.stop_cleanup(args)
+    # Only process this if no one else running..
+    running_components = components(args).select {|c| c.running?}.map{|c| c.name }
+    return unless running_components.empty?
+    nats_server = NatsServer.new
+    return unless nats_server.is_running?
+    nats_server.kill_server
+  end
+
+  def self.stop(args)
+    components(args).each(&:stop)
+    self.stop_cleanup(args)
+  end
+
+  def self.restart(args)
+    stop(args)
+    start(args)
+  end
+
+  def self.reset(args)
+    unless $noprompt
+      exit unless ask_to_continue "#{'CAUTION'.red}: All data will be lost. Continue?"
+    end
+
+    # Try not to shoot ourselves in the foot..
+    running_components = components([]).select {|c| c.running?}.map{|c| c.name }
+    unless running_components.empty?
+      puts "It looks like the following components are already running: #{running_components.join(', ')}"
+      puts "Resetting VCAP now may produce unintended results."
+      exit unless ask_to_continue
+      puts
+    end
+
+    cc_dir = File.expand_path(File.join(DIR, '..', 'cloud_controller'))
+    run_command("Resetting the CloudController database", "cd #{cc_dir} 2>&1 && bundle exec rake db:drop 2>&1")
+    puts
+
+    cc_log_dir = File.join(cc_dir, 'log')
+    run_command("Clearing the CloudController logs", "cd #{cc_log_dir} 2>&1 && rm -f *.log 2>&1")
+    puts
+
+    # TODO - Need to connect to mysql and unprovision any orphaned DBs
+    kill_service_instances('redis', /redis-server/)
+    puts
+    kill_service_instances('mongodb', /mongod/)
+    puts
+    kill_service_instances('neo4j', /neo4j/ )
+    puts
+
+    puts "Cleaning shared directories:"
+    dirs = %w[/var/vcap/services /var/vcap/shared /var/vcap/sys /var/vcap.local/* /tmp/vcap-run]
+    max_len = dirs.reduce(0) {|cur_max, dir| dir.length > cur_max ? dir.length : cur_max}
+    dirs.each do |dir|
+        run_command("  %-#{max_len}s" % [dir], "rm -rf #{dir}")
+    end
+  end
+
+  # Make tail exits fast and clean
+  def self.exit_tails
+    unless @tpids.empty?
+      kill = "kill -9 #{@tpids.join(' ')}"
+      `#{kill} 2> /dev/null`
+    end
+    exit!
+  end
+
+  def self.tail(args)
+    tail = 'tail'
+
+    # Annoying when CTRL-C takes forever
+    trap('TERM') { Run.exit_tails }
+    trap('INT')  { Run.exit_tails }
+
+    if RUBY_PLATFORM =~ /linux/i
+      # tail in coreutils 7.5 uses inotify
+      tail_version = `tail --version | grep coreutils | head -n1`.slice(/\d+.\d+/)
+      if tail_version < '7.5'
+        path = `which inotail`
+        tail = path.strip if $?.success?
+      end
+    end
+
+    @tpids = []
+    EM.run do
+      components(args).map do |component|
+        next unless component.running?
+        args = [tail, '-f', component.log_file]
+        tpid = EM.get_subprocess_pid( EM.popen(args.join(' '), Tail, component).signature )
+        @tpids << tpid
+      end
+      if @tpids.empty?
+        puts 'No tailable components currently running.'
+        EM.stop
+      end
+    end
+  end
+
+  module Tail
+    include EM::Protocols::LineText2
+
+    def initialize(component)
+      @component = component
+    end
+
+    def prefix
+      "%s --> " % @component.name.rjust(15)
+    end
+
+    def receive_line(line)
+      puts prefix + line
+      if line.start_with?('F') # FATAL
+        puts prefix + "fatal error, closing tail"
+        close_connection_after_writing
+      end
+    end
+
+  end
+
+  def self.status(args)
+    components(args).each(&:status)
+  end
+
+  private
+
+  # type: all, core, service, service_tool, service_auxilary, and name of registered components, e.g. router, mysql_node ...
+  def self.component_collection(type)
+    return Component.getNamedComponents().keys if type == "all"
+    return [type] if Component.getNamedComponents().include?(type)
+    collection = []
+    check_type_method_sym = "#{type}?".to_sym
+    Component.getNamedComponents().each do |k, v|
+      if v.method_defined?(check_type_method_sym) && v.new('foo').send(check_type_method_sym)
+        collection << k
+      end
+    end
+    collection
+  end
+
+  def self.alias_args(args)
+    aliased = []
+    args.each do |arg|
+      case arg
+      when 'mongo'
+        aliased << 'mongodb'
+      else
+        collection = Run.component_collection(arg)
+        if collection.empty?
+          aliased << arg
+        else
+          aliased.concat collection
+        end
+      end
+    end
+    aliased
+  end
+
+  def self.expand_args(args)
+    args = Run.alias_args(args)
+    new_args = []
+    args.each do |arg|
+      if Component.getNamedComponents().keys.include? arg
+        new_args << arg
+      else # This is a service, expand in place here..
+        new_args << "#{arg}_gateway"
+        new_args << "#{arg}_node"
+      end
+    end
+    new_args
+  end
+
+  def self.components(args)
+    args = Component.getNamedComponents().keys if args.empty?
+    args = Run.expand_args(args)
+    components = args.map do |arg|
+      component = Component.create(arg)
+      STDOUT.puts "Skipping invalid component: #{arg}" if component.nil?
+      component if (component && component.exists?)
+    end.compact
+    STDERR.puts "Don't know how to process '#{args.inspect}' \?\?" if components.empty?
+    components
+  end
+
+  def self.pad_left(str, padlen=2)
+    pad_str = " " * padlen
+    str.split("\n")                   \
+       .map {|line| pad_str + line }  \
+       .join("\n")
+  end
+
+  def self.run_command(desc, command)
+    print desc
+    output = `#{command}`
+    if $? == 0
+      puts " Ok".green
+    else
+      puts " Failed".red
+      puts "  '#{command}' exited with status '#{$?}', output:"
+      puts pad_left(output, 2)
+    end
+    [$?, output]
+  end
+
+  def self.ask_to_continue(prompt="Would you like to continue?")
+    should_continue = nil
+    while should_continue == nil
+      print prompt + " (y/N) "
+      choice = STDIN.gets.chomp
+      if choice.empty? || /^n/i.match(choice)
+        should_continue = false
+      elsif /^y/i.match(choice)
+        should_continue = true
+      end
+    end
+    should_continue
+  end
+
+  def self.find_processes(cmd_re)
+    output = `ps ax -o pid= -o command=`
+    ret = []
+    output.split("\n").each do |line|
+      pid, cmd = line.split(' ', 2)
+      ret << {:pid => pid, :command => cmd} if cmd_re.match(cmd)
+    end
+    ret
+  end
+
+  def self.kill_service_instances(name, cmd_re)
+    print "Checking for stray #{name} instances"
+    instances = find_processes(cmd_re)
+    puts " Ok".green
+
+    return if instances.empty?
+
+    puts "The following #{name} instances are running:"
+    puts "  PID    COMMAND"
+    instances.each do |instance|
+      puts "  %-6d %s" %  [instance[:pid], instance[:command]]
+    end
+
+    if ask_to_continue("Would you like to kill them?")
+      run_command("Killing instances", "kill -9 #{instances.map{|i| i[:pid]}.join(' ')}")
+    end
+  end
+
+end
+
+$config_dir ||= ENV['CLOUD_FOUNDRY_CONFIG_PATH']
+args = ARGV.dup
+opts_parser = OptionParser.new do |opts|
+  opts.on('--port PORT')                           { |port| $port = port.to_i }
+  opts.on('--configdir CONFIGDIR', '-c CONFIGDIR') { |dir| $config_dir = File.expand_path(dir.to_s) }
+  opts.on('--config CONFIGDIR')                    { |dir| $config_dir = File.expand_path(dir.to_s) }
+  opts.on('--vcapdir VCAP_DIR', '-v VCAP_DIR')     { |dir| $vcap_home = File.expand_path(dir.to_s) }
+  opts.on('--logdir LOG_DIR', '-l LOG_DIR')        { |dir| $log_dir = File.expand_path(dir.to_s) }
+  opts.on('--no-color', '--nocolor', '--nc')       { $nocolor = true }
+  opts.on('--noprompt', '-n')                      { $noprompt = true }
+end
+
+args = opts_parser.parse!(args)
+ENV['CLOUD_FOUNDRY_CONFIG_PATH'] = $config_dir
+
+DIR = File.join($vcap_home, "bin")
+
+SERVICE_DIR = File.join(DIR, '/services')
+unless $log_dir
+  $log_dir = "/tmp/vcap-run"
+  FileUtils.mkdir_p($log_dir)
+end
+
+$nocolor = true unless STDOUT.tty?
+
+if args.empty?
+  STDERR.puts "Usage: #{$0} [start|stop|restart|tail|status] [COMPONENT] [--no-color] [--config CONFIGDIR]"
+else
+  command = args.shift.downcase
+  if Run.respond_to?(command)
+    Run.send(command, args)
+  else
+    STDERR.puts "Don't know what to do with #{command.inspect}"
+  end
+end

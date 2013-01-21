@@ -1,0 +1,173 @@
+#!/bin/bash
+# Copyright (c) 2012 VMware, Inc.
+# Install vcap components on Ubuntu systems.
+
+set -o errexit
+
+usage() {
+cat <<EOF
+usage: $0 options
+
+OPTIONS:
+  -h           Show this message
+  -a           Answer yes to all questions
+  -p           http proxy i.e. -p http://username:password@host:port/
+  -c           deployment config
+  -d           cloudfoundry home
+  -D           cloudfoundry domain (default: vcap.me)
+  -r           cloud foundry repo base
+  -b           cloud foundry repo branch/tag/SHA
+EOF
+}
+
+function run_cmd () {
+  if [ -z "$PROXY" ]; then
+    $*
+  else
+    env http_proxy=$PROXY $*
+  fi
+}
+
+function clear_bundler_settings () {
+  [ $# -ge 1 ] || return 1
+  local DIR=$1
+  # Do we have a Bundler problem?
+  find $DIR -type d -name .bundle | grep -Fq .bundle || return 0
+  if [ "$ALL" != true ]; then
+    read -p "Remembered Bundler options could cause you troubles, do you want me to clear them for you? [Y/n]"
+    [[ $REPLY =~ ^[nN] ]] && return 0
+  fi
+  (cd $DIR && find -type d -name .bundle -prune -exec rm -r {} \; )
+}
+
+RUBY="/usr/local/rvm/rubies/ruby-1.9.3-p194/bin/ruby"
+GEM="/usr/local/rvm/rubies/ruby-1.9.3-p194/bin/gem"
+
+if [ -n "$http_proxy" ]; then
+  if [ -z "$https_proxy" ]; then
+    echo "Please set https_proxy env variable."
+    exit 1
+  fi
+  PROXY=$http_proxy
+fi
+
+while getopts "had:p:c:D:r:b:" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit 1
+      ;;
+    a)
+      ALL=true
+      ;;
+    c)
+      CONFIG_FILE=$OPTARG
+      ;;
+    d)
+      CLOUDFOUNDRY_HOME=$OPTARG
+      ;;
+    D)
+      CLOUDFOUNDRY_DOMAIN=$OPTARG
+      ;;
+    r)
+      VCAP_REPO_BASE=$OPTARG
+      ;;
+    b)
+      VCAP_REPO_BRANCH=$OPTARG
+      ;;
+    p)
+      PROXY=$OPTARG
+      export http_proxy=$PROXY
+      export https_proxy=$PROXY
+  esac
+done
+
+if [ -z "$CLOUDFOUNDRY_HOME" ]; then
+  CLOUDFOUNDRY_HOME=~/cloudfoundry
+fi
+
+if [ -z "$CLOUDFOUNDRY_DOMAIN" ]; then
+  CLOUDFOUNDRY_DOMAIN=vcap.me
+fi
+
+if [ -z "$VCAP_REPO_BASE" ]; then
+  VCAP_REPO_BASE=https://github.com/cloudfoundry
+fi
+
+if [ -z "$VCAP_REPO_BRANCH" ]; then
+  VCAP_REPO_BRANCH=master
+fi
+
+# apt-get update
+run_cmd yum clean all
+
+# Check if we have access to the web
+echo "Installing wget..."
+if ! run_cmd yum install -y gcc make openssl-devel wget; then
+  echo "Can't install prerequisite: wget"
+  exit 1
+fi
+
+echo "Checking web connectivity."
+if ! wget -q -T 2 -t 2 -O - http://api.cloudfoundry.com/info | grep "Cloud Application Platform" > /dev/null; then
+  echo "Giving up. Cannot connect to the web. Check your proxy settings if you are behind a proxy."
+  exit 1
+fi
+
+# Install chef
+echo "Installing prerequisites..."
+run_cmd yum install -y "ruby-renren"
+source /usr/local/rvm/environments/default
+
+echo "Installing chef..."
+CHEF_VERSION="10.16.4"
+${GEM} list -i chef -v ${CHEF_VERSION} || ${GEM} install chef --version ${CHEF_VERSION} -q --no-ri --no-rdoc > /dev/null
+
+# Install blobstore_client
+echo "Installing blobstore_client..."
+BLOB_VERSION="0.4.0"
+${GEM} list -i blobstore_client -v ${BLOB_VERSION} || ${GEM} install blobstore_client --version ${BLOB_VERSION} -q --no-ri --no-rdoc > /dev/null
+
+# Install rake
+echo "Installing rake..."
+${GEM} list -i rake -i || ${GEM} install rake -q --no-ri --no-rdoc > /dev/null
+
+# Clone cloudfoundry repo
+echo "Installing git..."
+run_cmd yum install -y git-core
+
+[ -d $CLOUDFOUNDRY_HOME ] || mkdir $CLOUDFOUNDRY_HOME
+REPO=vcap
+if [ ! -d $CLOUDFOUNDRY_HOME/${REPO} ]; then
+  if ! (cd $CLOUDFOUNDRY_HOME
+    git clone --no-checkout $VCAP_REPO_BASE/$REPO
+    cd $REPO
+    git checkout $VCAP_REPO_BRANCH
+    git submodule update --recursive --init
+  ); then
+    echo "Unable to clone cloudfoundry $REPO repo."
+    exit 1
+  fi
+else
+  clear_bundler_settings $CLOUDFOUNDRY_HOME/$REPO
+fi
+
+# Launch chef
+ARGS=""
+if [ -n "$CLOUDFOUNDRY_HOME" ]; then
+  ARGS="-d $CLOUDFOUNDRY_HOME"
+fi
+
+if [ -n "$CLOUDFOUNDRY_DOMAIN" ]; then
+  ARGS="$ARGS -D $CLOUDFOUNDRY_DOMAIN"
+fi
+
+if [ -n "$CONFIG_FILE" ]; then
+  ARGS="$ARGS -c $CONFIG_FILE"
+fi
+
+echo ""
+echo "Launching chef..."
+sleep 3
+$CLOUDFOUNDRY_HOME/vcap/dev_setup/lib/chefsolo_launch.rb $ARGS

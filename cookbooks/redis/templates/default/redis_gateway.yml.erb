@@ -1,0 +1,39 @@
+---
+cloud_controller_uri: <%= node[:cloud_controller][:service_api_uri] %>
+service:
+  name: redis
+  version: "2.2"
+  description: 'Redis key-value store service'
+  plans: ['free']
+  default_plan: 'free'
+  tags: ['key-value', 'nosql']
+  timeout: <%= node[:redis_gateway][:service][:timeout] %>
+  supported_versions: <%= "['#{node[:redis][:supported_versions].keys.join("', '")}']"%>
+  version_aliases:
+<% node[:redis][:version_aliases].each do |a, v| %>
+    "<%= a %>": "<%= v %>"
+<% end %>
+host: localhost
+index: 0
+token: <%= node[:redis_node][:token] %>
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+node_timeout: <%= node[:redis_gateway][:node_timeout] %>
+pid: /var/vcap/sys/run/redis_service.pid
+logging:
+  level: debug
+<%if node[:service_lifecycle][:enable]%>
+resque:
+  host: <%= node[:redis_resque][:host]%>
+  port: <%= node[:redis_resque][:port]%>
+  password: <%= node[:redis_resque][:password] %>
+  expire: <%= node[:redis_resque][:expire]%>
+download_url_template: "http://service-serialization.<%= node[:deployment][:domain] %>/serialized/%{service}/%{name}/snapshots/%{snapshot_id}?token=%{token}"
+plan_management:
+  plans:
+    free:
+      lifecycle:
+        snapshot:
+          quota: <%= node[:service_lifecycle][:snapshot_quota] || "5" %>
+        serialization: enable
+        job: enable
+<%end%>

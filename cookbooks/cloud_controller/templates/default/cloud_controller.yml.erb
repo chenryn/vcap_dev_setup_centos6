@@ -1,0 +1,141 @@
+---
+# Cloud Controller URI
+external_uri: api.<%= node[:deployment][:domain] %>
+description: <%= node[:deployment][:welcome] %>
+support_address: http://support.cloudfoundry.com
+
+# local_route is the IP address of a well known server on your network, it
+# is used to choose the right ip address (think of hosts that have multiple nics
+# and IP addresses assigned to them) of the host running the cloud controller. Default
+# value of nil, should work in most cases.
+local_route: <%= node[:cloud_controller][:local_route] %>
+
+# Specifies if new users are allowed to register via VMC
+allow_registration: true
+
+# Allow applications to register URIs that are outside your domain.
+# Legacy (FIXME REMOVE)
+allow_external_app_uris: false
+
+# This dicatates what the uri namespace rules
+# are for applications. Admins can overide any of the
+# below accept taking a used uri.
+
+app_uris:
+  # Allow applications to register URIs that are outside your domain.
+  allow_external: false
+#  reserved_file:
+#  reserved_list: [www, test, dash, register, foo, bar]
+#  reserved_length: 3
+
+external_port: 9022 #public CC port
+
+# nginx proxy provide multiple functions including offloading of file uploads/downloads.
+nginx:
+  use_nginx: true   #nginx proxy in front of CC?
+  instance_socket: /tmp/cloud_controller.sock
+  # insecure_instance_port: 9025 #debug only!!!! -- not for production use.
+
+# if log_file is set, it must be a fully-qualified path,
+# because the bin/vcap script reads it directly from the file.
+logging:
+  level: debug
+# file:
+
+# Settings for the rails logger
+rails_logging:
+  level: debug
+# file:
+
+directories:
+  droplets: /var/vcap/shared/droplets
+  resources: /var/vcap/shared/resources
+  # default values, relative to Rails.root. Leading slash for full path.
+  staging_manifests: <%= File.join(node[:deployment][:config_path], "staging") %>
+  tmpdir: /var/vcap/data/cloud_controller/tmp
+
+# NATS message bus URI
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+keys:
+  password: 'password key goes here'
+  token: 'token key goes here'
+pid: /var/vcap/sys/run/cloudcontroller.pid
+rails_environment: production
+database_environment: # replaces database.yml
+  production:
+    database: <%= node[:ccdb][:database] %>
+    host: <%= node[:ccdb][:host] %>
+    port: <%= node[:ccdb][:port] %>
+    encoding: utf8
+    username: <%= node[:ccdb][:user] %>
+    password: <%= node[:ccdb][:password] %>
+    adapter: <%= node[:ccdb][:adapter] %>
+    timeout: 2000
+    template: template0 # Required for utf8 encoding
+
+# Enable the use of the uaa
+uaa:
+  enabled: true
+  url: http://uaa.<%= node[:deployment][:domain] %>
+  resource_id: cloud_controller
+  token_secret: <%= node[:uaa][:jwt_secret] %>
+  client_secret: <%= node[:uaa][:cloud_controller][:password] %>
+  token_creation_email_filter: [""]
+
+# redis for new stager
+redis:
+  host: <%= node[:vcap_redis][:host] %>
+  port: <%= node[:vcap_redis][:port] %>
+  password: <%= node[:vcap_redis][:password] %>
+
+# App staging parameters
+staging:
+  # Max duration for staging process
+  max_staging_runtime:    120 # secs
+
+  auth:
+    user: zxsfhgjg
+    password: ZNVfdase9
+
+# admin support
+admins: [ <%= node[:cloud_controller][:admins].join(", ") %> ]
+https_required: false
+https_required_for_admins: false
+
+# Controls the amount of resources assigned to a user
+# Normal user accounts
+default_account_capacity:
+  memory:   2048
+  app_uris: <%= node[:capacity][:max_uris] %>
+  services: <%= node[:capacity][:max_services] %>
+  apps:     <%= node[:capacity][:max_apps] %>
+
+# Services we provide, and their tokens. Avoids bootstrapping DB.
+builtin_services:
+  <% @builtin_services.each do |service_name| %>
+  <%= service_name=="vblob"?"blob":service_name %>:
+    token: <%= node[(service_name + "_node").to_sym][:token] %>
+  <% end %>
+
+service_proxy:
+  token: ["<%= node[:service_broker][:token] %>"]
+
+# Enable/disable starting apps in debug modes.
+allow_debug: true
+
+<% if node[:service_lifecycle][:enable] == true
+  if node[:serialization_data_server][:use_nginx] === true
+    sds_port = node[:serialization_data_server][:nginx_port] || 4997
+  else
+    sds_port = node[:serialization_data_server][:port] || 4998
+  end
+%>
+service_lifecycle:
+  max_upload_size: <%= node[:service_lifecycle][:max_upload_size] || 1 %>
+  upload_token: <%= node[:serialization_data_server][:upload_token]%>
+  upload_timeout: <%= node[:serialization_data_server][:upload_timeout]%>
+  serialization_data_server:
+  - <%= node[:serialization_data_server][:host]%>:<%= sds_port %>
+<% end %>
+
+runtimes_file: <%= File.join(node[:deployment][:config_path], "runtimes.yml") %>

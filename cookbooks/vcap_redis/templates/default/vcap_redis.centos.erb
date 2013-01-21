@@ -1,0 +1,53 @@
+#! /bin/sh
+# chkconfig: 2345 99 99
+# description: init script for vcap redis-server
+# AUTHOR: Jeff Rao<rao.chenlin@gmail.com>
+# Date: 2013-01-19
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+PROG=<%= node[:vcap_redis][:path] %>/bin/redis-server
+ARGS=<%= node[:deployment][:config_path] %>/vcap_redis.conf
+NAME=vcap_redis
+
+test -x $PROG || exit 0
+
+set -e
+
+#. /etc/init.d/functions
+
+start () {
+    echo "Starting: $NAME"
+    $PROG $ARGS
+    ps aux | grep vcap_redi[s] | awk '{print $2}' > /var/run/$NAME.pid
+    return $?
+}
+stop () {
+    echo "Stopping: $NAME"
+    [ -f /var/run/$NAME.pid ] || return 0
+    kill -TERM `cat /var/run/$NAME.pid`
+    return $?
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    sleep 1
+    start
+    ;;
+  status)
+    status=`ps aux|grep vcap_redi[s]|wc -l`
+    [[ $status == 1 ]] && exit 0 || exit $?
+    ;;
+  *)
+    echo "Usage: $NAME {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

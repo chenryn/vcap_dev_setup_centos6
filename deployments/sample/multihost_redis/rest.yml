@@ -1,0 +1,22 @@
+---
+deployment:
+  name: "rest"
+jobs:
+  install:
+    - nats_server
+    - cloud_controller:
+        builtin_services:
+          - redis
+          - mongodb
+          - mysql
+    - router
+    - stager
+    - health_manager
+    - redis_gateway
+    - ccdb
+    - mysql_node:
+        index: "0"
+    - mysql_gateway
+    - mongodb_gateway
+    - mongodb_node:
+        index: "0"

@@ -1,0 +1,29 @@
+---
+capacity: <%= node[:vblob_node][:capacity] %>
+plan: free
+local_db: sqlite3:/var/vcap/services/vblob/vblob_node.db
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+index: <%= node[:vblob_node][:index] %>
+base_dir: /var/vcap/services/vblob/instances
+logging:
+  level: debug
+vblobd_log_dir: /var/vcap/sys/service-log/vblob
+pid: /var/vcap/sys/run/vblob_node.pid
+
+<% versions = node[:vblob][:supported_versions].collect {|v| "\"#{v}\""} %>
+supported_versions: [ <%= versions.join(", ") %> ]
+default_version: "<%= node[:vblob][:default_version] %>"
+
+max_memory: <%= node[:vblob_node][:max_memory] %>
+node_id: <%= "vblob_node_#{node[:vblob_node][:index]}" %>
+op_time_limit: <%= node[:vblob_node][:op_time_limit] %>
+vblob_timeout: <%= node[:vblob_node][:vblob_timeout] %>
+vblob_start_timeout: <%= node[:vblob_node][:vblob_start_timeout] %>
+nodejs_path: <%= node[:node06][:path] %>/bin/node
+vblobd_path: <%= File.join(node[:vblob][:path], node[:vblob][:default_version]) %>
+vblobd_auth: <%= node[:vblob_node][:auth] %>
+vblobd_quota: 2147483647
+vblobd_obj_limit: 32768
+port_range:
+  first: 45001
+  last: 65000

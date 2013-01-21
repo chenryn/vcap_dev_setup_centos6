@@ -1,0 +1,117 @@
+NOTE: This is an alpha release of these scripts.
+
+Description:
+This subdirectory contains the chef cookbooks to deploy and setup Cloud Foundry
+in a single or multiple host environment. The cookbooks assume that they are
+running on a freshly installed Ubuntu 10.04.4 server.
+
+Quick Start:
+-----------
+   To Deploy:
+      vcap/dev_setup/bin/vcap_dev_setup
+
+         It will download Cloud Foundry source code into
+            $HOME/cloudfoundry/vcap
+
+         It will create a default deployment named 'devbox' under
+            $HOME/cloudfoundry/.deployments/devbox
+
+   To Start:
+      vcap/dev_setup/bin/vcap_dev start
+
+   To Stop:
+      vcap/dev_setup/bin/vcap_dev stop
+
+
+More Options:
+------------
+
+o To use Cloud Foundry source code that you have already downloaded.
+   To Deploy:
+     e.g. If Cloud Foundry source is downloaded into $HOME/projects/vcap.
+
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -d $HOME/projects
+
+        It will not download Cloud Foundry source code. It will just setup the config files to
+        use the Cloud Foundry source code from $HOME/projects/vcap.
+
+        It will create a default deployment named 'devbox' under
+          $HOME/projects/.deployment/devbox
+
+   To Start:
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev -d $HOME/projects start
+
+   To Stop::
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev -d $HOME/projects stop
+
+o To use a custom deployment config
+  e.g. If you want to use the multihost sample config file
+  $HOME/projects/vcap/dev_setup/deployments/sample/multihost_mysql/dea.yml
+
+   To Deploy:
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -d $HOME/projects -c $HOME/projects/vcap/dev_setup/deployments/sample/multihost_mysql/dea.yml
+
+        It will not download Cloud Foundry source code. It will just setup the config files to
+        use the Cloud Foundry source code from $HOME/projects/vcap.
+
+        It will create a deployment named 'dea' under
+          $HOME/projects/.deployment/dea
+
+   To Start:
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev -d $HOME/projects -n dea start
+
+   To Stop:
+      $HOME/projects/vcap/dev_setup/bin/vcap_dev -d $HOME/projects -n dea stop
+
+o To use a custom domain
+  e.g. If you do not want your CloudFoundry domain as vcap.me
+  $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -D myowndomain.com
+
+  Later, you will target your CloudFoundry installation with:
+    vmc target api.myowndomain.com
+
+o Service backup:
+  By default, backup feature is disabled. If you want to enable this feature, you could run
+  a script:
+    $HOME/projects/vcap/dev_setup/bin/vcap_service_backup_ctl start|stop|restart|status <service_type>
+
+  service_type is optional, it could be one of services which support backup feature or all of these
+  when service_type is empty.
+
+  start|restart: add lines to crontab
+  stop:  remove lines from crontab
+  status: get lines from crontab
+
+  If you want to clean the backups that belongs to the service instance which is un-provisioned, you
+  should use the backup manager.
+
+  By default, backup_manager is not installed, you should add "backup_manager" in your deployment config file, and
+  re-run vcap_dev_setup.
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -c <your config file>
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev start backup_manager
+
+o Service lifecycle:
+  By default, service lifecycle feature is disabled.
+  If you want to enable this feature, please add the below items in your deployment config file.
+    - services_redis
+    - serialization_data_server
+    - snapshot_manager
+    - redis_worker
+    - mysql_worker
+    - mongodb_worker
+    - postgresql_worker
+  Then, re-run vcap_dev_setup and start.
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -c <your config file>
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev restart
+
+  snapshot_manager is used to clean the snapshots which belong to the service un-provisioned instances.
+
+o To deploy all the components:
+  By default, vcap_dev_setup uses "$HOME/projects/vcap/dev_setup/deployments/devbox.yml" as the deployment
+  config file, containing most components in cloudfoundry, but not all.
+  To deploy all the components, see below:
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev_setup -c $HOME/projects/vcap/dev_setup/deployments/devbox_all.yml
+    $HOME/projects/vcap/dev_setup/bin/vcap_dev start
+
+NOTE: To learn more about custom deployment config files and multi host setups
+see the README file vcap/dev_setup/deployments/README.

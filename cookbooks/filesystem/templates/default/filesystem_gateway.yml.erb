@@ -1,0 +1,26 @@
+---
+cloud_controller_uri: <%= node[:cloud_controller][:service_api_uri] %>
+service:
+  name: filesystem
+  version: "1.0"
+  description: 'Persistent filesystem service'
+  plans: ['free']
+  default_plan: 'free'
+  tags: ['Persistent filesystem service']
+  timeout: <%= node[:filesystem_gateway][:service][:timeout] %>
+  supported_versions: <%= "['#{node[:filesystem][:supported_versions].keys.join("', '")}']"%>
+  version_aliases:
+<% node[:filesystem][:version_aliases].each do |a, v| %>
+    "<%= a %>": "<%= v %>"
+<% end %>
+token: <%= node[:filesystem_node][:token] %>
+logging:
+  level: debug
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+pid: /var/vcap/sys/run/filesystem_service.pid
+node_timeout: <%= node[:filesystem_gateway][:node_timeout] %>
+fs_type: local
+backends:
+<% node[:filesystem_gateway][:backends].each do |path| %>
+  - local_path: <%= path %>
+<% end %>

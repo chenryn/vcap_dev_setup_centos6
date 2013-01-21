@@ -1,0 +1,54 @@
+
+
+pid: /var/vcap/sys/run/uaa.pid
+# NATS message bus URI
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+
+name: UAA
+
+database:
+  url: jdbc:postgresql://<%= node[:uaadb][:host] %>:<%= node[:uaadb][:port] %>/<%= node[:uaadb][:database] %>
+
+jvm_args: -Xmx512m
+spring_profiles: postgresql
+
+cloud_controller:
+  database:
+    url: jdbc:postgresql://<%= node[:ccdb][:host] %>:<%= node[:ccdb][:port] %>/<%= node[:ccdb][:database] %>
+    username: <%= node[:ccdb][:user] %>
+    password: <%= node[:ccdb][:password] %>
+
+jwt:
+  token:
+    signing-key: <%= node[:uaa][:jwt_secret] %>
+    verification-key: <%= node[:uaa][:jwt_secret] %>
+
+batch:
+  username: <%= node[:uaa][:batch][:username] %>
+  password: <%= node[:uaa][:batch][:password] %>
+
+oauth:
+  clients:
+    admin:
+      authorized-grant-types: client_credentials
+      scope: uaa.none
+      authorities: clients.read,clients.write,clients.secret,uaa.admin,scim.read,scim.write,password.write
+      id: admin
+      secret: <%= node[:uaa][:admin][:password] %>
+      resource-ids: none
+    cloud_controller:
+      authorized-grant-types: client_credentials
+      scope: uaa.none
+      authorities: scim.read,scim.write,password.write,uaa.resource
+      id: cloud_controller
+      secret: <%= node[:uaa][:cloud_controller][:password] %>
+      resource-ids: none
+      access-token-validity: 604800
+    vmc:
+      authorized-grant-types: implicit
+      scope: cloud_controller.read,cloud_controller.write,password.write,openid
+      authorities: uaa.none
+      id: vmc
+      resource-ids: none
+      redirect-uri: http://uaa.cloudfoundry.com/redirect/vmc,https://uaa.cloudfoundry.com/redirect/vmc
+      access-token-validity: 604800

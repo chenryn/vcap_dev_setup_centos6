@@ -1,0 +1,78 @@
+---
+# Base directory where all applications are staged and hosted
+base_dir: /var/vcap.local/dea
+
+# Local_route is the IP address of a well known server on your network, it
+# is used to choose the right ip address (think of hosts that have multiple nics
+# and IP addresses assigned to them) of the host running the DEA. Default
+# value of nil, should work in most cases.
+local_route: <%= node[:dea][:local_route] %>
+
+# Port for accessing the files of running applications
+filer_port: 12345
+
+# NATS message bus URI
+mbus: nats://<%= node[:nats_server][:user] %>:<%= node[:nats_server][:password] %>@<%= node[:nats_server][:host] %>:<%= node[:nats_server][:port] %>/
+
+intervals:
+  # Time interval between heartbeats sent to the Health Manager
+  heartbeat: 10
+logging:
+  level: <%= node[:dea][:logging] %>
+
+# Maximum memory allocated to this DEA. In a multi tenant setup, this
+# memory is divided amongst all applications managed by this DEA.
+max_memory: 4096
+
+# Secure environment for running applications in a multi tenant setup.
+secure: <%= node[:dea][:secure] %>
+
+# Allow more than one application to run per DEA
+multi_tenant: <%= node[:dea][:multi_tenant] %>
+
+# Provide ulimit based resource isolation in a multi tenant setup.
+enforce_ulimit: <%= node[:dea][:enforce_ulimit] %>
+
+pid: /var/vcap/sys/run/dea.pid
+
+#Force droplets to be downloaded over http even when
+#there is a shared directory containing the droplet.
+force_http_sharing: true
+
+# This is where the execution agent determines its available runtimes.
+# version flags are assumed to be '-v' unless noted below.
+
+runtimes:
+<% if node[:dea][:runtimes].include?("ruby18") %>
+  - ruby18
+<% end %>
+<% if node[:dea][:runtimes].include?("ruby19") %>
+  - ruby19
+<% end %>
+<% if node[:dea][:runtimes].include?("ruby193") %>
+  - ruby193
+<% end %>
+<% if node[:dea][:runtimes].include?("node04") %>
+  - node
+<% end %>
+<% if node[:dea][:runtimes].include?("node06") %>
+  - node06
+<% end %>
+<% if node[:dea][:runtimes].include?("node08") %>
+  - node08
+<% end %>
+<% if node[:dea][:runtimes].include?("java") %>
+  - java
+<% end %>
+<% if node[:dea][:runtimes].include?("java7") %>
+  - java7
+<% end %>
+<% if node[:dea][:runtimes].include?("erlang") %>
+  - erlangR14B01
+<% end %>
+<% if node[:dea][:runtimes].include?("php") %>
+  - php
+<% end %>
+<% if node[:dea][:runtimes].include?("python2") %>
+  - python2
+<% end %>
