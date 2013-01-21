@@ -7,6 +7,28 @@
 #
 
 case node['platform']
+when "centos"
+  %w[
+    pcre-devel
+    pcre
+    httpd
+    apr
+    apr-util
+    php
+    php-devel
+    php-mysql
+    php-pgsql
+    php-gd
+    php-common
+#    php-curl
+    php-mcrypt
+    php-pecl-imagick
+    php-xmlrpc
+    php-imap
+    php-pear
+    php-ZendFramework
+  ].each {|pkg| package pkg }
+  
 when "ubuntu"
   %w[
     libpcre3
@@ -29,31 +51,46 @@ when "ubuntu"
     zend-framework
   ].each {|pkg| package pkg }
 
-  bash "Setup php" do
-    code <<-EOH
-      cd /tmp/
-      pear channel-discover pear.phpunit.de
-      pear channel-discover pear.symfony-project.com
-      pear channel-discover components.ez.no
-      pear install phpunit/PHPUnit
+end
 
-      yes | pecl install apc
-      yes | pecl install memcache
-      yes | pecl install mongo
+bash "Setup php" do
+  code <<-EOH
+    cd /tmp/
+    pear channel-discover pear.phpunit.de
+    pear channel-discover pear.symfony-project.com
+    pear channel-discover components.ez.no
+    pear install phpunit/PHPUnit
 
-      git clone git://github.com/owlient/phpredis.git
-      cd phpredis
-      phpize && ./configure && make && make install
-      cd ..
-      rm -rf phpredis
+    yes | pecl install apc
+    yes | pecl install memcache
+    yes | pecl install mongo
 
-      php -v
-    EOH
-    not_if do
-      ::File.exists?("/usr/bin/php")
-    end
+    git clone git://github.com/owlient/phpredis.git
+    cd phpredis
+    phpize && ./configure && make && make install
+    cd ..
+    rm -rf phpredis
 
+    php -v
+  EOH
+  not_if do
+    ::File.exists?("/usr/bin/php")
   end
+
+end
+
+case node['platform']
+when "centos"
+
+  bash "Stop apache" do
+    code <<-EOH
+      /etc/init.d/httpd stop
+      chkconfig --del httpd
+      exit 0
+    EOH
+  end
+
+when "ubuntu"
 
   bash "Stop apache" do
     code <<-EOH
