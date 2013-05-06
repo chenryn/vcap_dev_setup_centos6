@@ -117,8 +117,7 @@ fi
 
 # Install chef
 echo "Installing prerequisites..."
-run_cmd yum install -y "ruby-renren"
-source /usr/local/rvm/environments/default
+run_cmd rpm -ivh ftp://fr2.rpmfind.net/linux/mageia/distrib/cauldron/x86_64/media/core/release/ruby-1.9.3.p392-1.mga3.x86_64.rpm
 
 echo "Installing chef..."
 CHEF_VERSION="10.16.4"
