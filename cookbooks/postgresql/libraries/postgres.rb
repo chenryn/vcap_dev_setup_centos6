@@ -81,6 +81,59 @@ module CloudFoundryPostgres
           end
         end
       end
+
+    when "centos"
+      bash "Install pgdg repos from postgresql" do
+        code <<-EOH
+        rpm -ivh 'http://yum.postgresql.org/9.0/redhat/rhel-6-x86_64/pgdg-centos90-9.0-5.noarch.rpm'
+        EOH
+      end
+    
+      %w[postgresql90 postgresql90-server].each do |pkg|
+        package pkg
+      end
+
+      bash "move example to configuration" do
+        code <<-EOH
+        rename .conf.example .conf /usr/pgsql-#{pg_major_version}/share/*.conf.example
+        EOH
+      end
+
+      ruby_block "Update PostgreSQL config" do
+        block do
+          # update postgresql.conf
+          postgresql_conf_file = File.join("", "usr", "pgsql-#{pg_major_version}", "share", "postgresql.conf")
+          Chef::Log.error("Installation of PostgreSQL #{postgresql_pkg} failed, could not find config file #{postgresql_conf_file}") && (exit 1) unless File.exist?(postgresql_conf_file")
+
+          `grep "^\s*listen_addresses" #{postgresql_conf_file}`
+          if $?.exitstatus != 0
+            `echo "listen_addresses='#{node[:postgresql][:host]},localhost'" >> #{postgresql_conf_file}`
+          else
+            `sed -i.bkup -e "s/^\s*listen_addresses.*$/listen_addresses='#{node[:postgresql][:host]},localhost'/" #{postgresql_conf_file}`
+          end
+
+          `grep "^\s*port\s*=\s*\d*" #{postgresql_conf_file}`
+          if $?.exitstatus != 0
+            `echo "port = #{pg_port}" >> #{postgresql_conf_file}`
+          else
+            `sed -i.bkup -e "s/^\s*port\s*=\s*.*/port = #{pg_port}/" #{postgresql_conf_file}`
+          end
+
+          # restart postgrsql
+          init_file = File.join("", "etc", "init.d", "postgresql-#{pg_major_version}")
+          backup_init_file = File.join("", "etc", "init.d", "postgresql90")
+
+          if File.exists?(init_file)
+            Chef::Log.error("Fail to restart postgresql using #{init_file}") && (exit 1) unless system("#{init_file} restart")
+          elsif File.exists?(backup_init_file)
+            Chef::Log.error("Fail to restart postgresql using #{backup_init_file}") && (exit 1) unless system("#{backup_init_file} restart #{pg_major_version}")
+          else
+            Chef::Log.error("Installation of PostgreSQL maybe failed, could not find init script")
+            exit 1
+          end
+        end
+      end
+
     else
       Chef::Log.error("PostgreSQL database setup is not supported on this platform.")
     end
@@ -97,42 +150,42 @@ module CloudFoundryPostgres
   def cf_pg_update_hba_conf(db, user, pg_version)
     case node['platform']
     when "ubuntu"
-      ruby_block "Update PostgreSQL config" do
-        block do
-          /\s*\d*.\d*\s*/ =~  "#{pg_version}"
-          pg_major_version = $&.strip
+      pg_hba_conf_file = File.join("", "etc", "postgresql", pg_major_version, "main", "pg_hba.conf")
+    when "centos"
+      pg_hba_conf_file = File.join("", "usr", "pgsql-#{pg_major_version}", "share", "pg_hba.conf")
+    else
+      Chef::Log.error("PostgreSQL config update is not supported on this platform.")
+    end
+    ruby_block "Update PostgreSQL config" do
+      block do
+        /\s*\d*.\d*\s*/ =~  "#{pg_version}"
+        pg_major_version = $&.strip
 
-          # Update pg_hba.conf
-          pg_hba_conf_file = File.join("", "etc", "postgresql", pg_major_version, "main", "pg_hba.conf")
-          `grep "#{db}\s*#{user}" #{pg_hba_conf_file}`
-          if $?.exitstatus != 0
-            `echo "host #{db} #{user} 0.0.0.0/0 md5" >> #{pg_hba_conf_file}`
-          end
+        # Update pg_hba.conf
+        `grep "#{db}\s*#{user}" #{pg_hba_conf_file}`
+        if $?.exitstatus != 0
+          `echo "host #{db} #{user} 0.0.0.0/0 md5" >> #{pg_hba_conf_file}`
+        end
 
-          # restart postgrsql
-          init_file = "#{File.join("", "etc", "init.d", "postgresql-#{pg_major_version}")}"
-          backup_init_file = "#{File.join("", "etc", "init.d", "postgresql")}"
+        # restart postgrsql
+        init_file = "#{File.join("", "etc", "init.d", "postgresql-#{pg_major_version}")}"
+        backup_init_file = "#{File.join("", "etc", "init.d", "postgresql")}"
 
-          if File.exists?(init_file)
-            Chef::Log.error("Fail to restart postgresql using #{init_file}") && (exit 1) unless system("#{init_file} restart")
+        if File.exists?(init_file)
+          Chef::Log.error("Fail to restart postgresql using #{init_file}") && (exit 1) unless system("#{init_file} restart")
+        else
+          if File.exists?(backup_init_file)
+            Chef::Log.error("Fail to restart postgresql using #{backup_init_file}") && (exit 1) unless system("#{backup_init_file} restart #{pg_major_version}")
           else
-            if File.exists?(backup_init_file)
-              Chef::Log.error("Fail to restart postgresql using #{backup_init_file}") && (exit 1) unless system("#{backup_init_file} restart #{pg_major_version}")
-            else
-              Chef::Log.error("Installation of PostgreSQL maybe failed, could not find init script")
-              exit 1
-            end
+            Chef::Log.error("Installation of PostgreSQL maybe failed, could not find init script")
+            exit 1
           end
         end
       end
-    else
-      Chef::Log.error("PostgreSQL config update is not supported on this platform.")
     end
   end
 
   def cf_pg_setup_db(db, user, passwd, is_super=false, server_port="5432")
-    case node['platform']
-    when "ubuntu"
       if is_super
         super_val="SUPERUSER"
       else
@@ -148,48 +201,48 @@ module CloudFoundryPostgres
         echo \"db #{db} user #{user} pass #{passwd} on port #{server_port}\" >> #{File.join("", "tmp", "cf_pg_setup_db")}
         EOH
       end
-    else
-      Chef::Log.error("PostgreSQL database setup is not supported on this platform.")
-    end
   end
 
   def cf_pg_hba_local_trust(pg_version)
     case node['platform']
     when "ubuntu"
-      ruby_block "Update PostgreSQL hba config to permit access without password in local node" do
-        block do
-          /\s*\d*.\d*\s*/ =~  "#{pg_version}"
-          pg_major_version = $&.strip
+      pg_hba_conf_file = File.join("", "etc", "postgresql", pg_major_version, "main", "pg_hba.conf")
+    when "centos"
+      pg_hba_conf_file = File.join("", "usr", "pgsql-#{pg_major_version}", "share", "pg_hba.conf")
+    else
+      Chef::Log.error("PostgreSQL config update is not supported on this platform.")
+    end
 
-          # Update pg_hba.conf
-          pg_hba_conf_file = File.join("", "etc", "postgresql", pg_major_version, "main", "pg_hba.conf")
-          `sed -i /local[[:space:]]*all[[:space:]]*all/d #{pg_hba_conf_file}`
-          `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*127\.0\.0\.1/d #{pg_hba_conf_file}`
-          `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*::1/d #{pg_hba_conf_file}`
-          `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*0\.0\.0\.0/d #{pg_hba_conf_file}`
-          `echo "local   all             all                                     trust" >> #{pg_hba_conf_file}`
-          `echo "host    all             all             127.0.0.1/32            trust" >> #{pg_hba_conf_file}`
-          `echo "host    all             all             ::1/128                 trust" >> #{pg_hba_conf_file}`
-          `echo "host    all             all             0.0.0.0/0               md5"   >> #{pg_hba_conf_file}`
+    ruby_block "Update PostgreSQL hba config to permit access without password in local node" do
+      block do
+        /\s*\d*.\d*\s*/ =~  "#{pg_version}"
+        pg_major_version = $&.strip
 
-          # restart postgrsql
-          init_file = "#{File.join("", "etc", "init.d", "postgresql-#{pg_major_version}")}"
-          backup_init_file = "#{File.join("", "etc", "init.d", "postgresql")}"
+        # Update pg_hba.conf
+        `sed -i /local[[:space:]]*all[[:space:]]*all/d #{pg_hba_conf_file}`
+        `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*127\.0\.0\.1/d #{pg_hba_conf_file}`
+        `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*::1/d #{pg_hba_conf_file}`
+        `sed -i /host[[:space:]]*all[[:space:]]*all[[:space:]]*0\.0\.0\.0/d #{pg_hba_conf_file}`
+        `echo "local   all             all                                     trust" >> #{pg_hba_conf_file}`
+        `echo "host    all             all             127.0.0.1/32            trust" >> #{pg_hba_conf_file}`
+        `echo "host    all             all             ::1/128                 trust" >> #{pg_hba_conf_file}`
+        `echo "host    all             all             0.0.0.0/0               md5"   >> #{pg_hba_conf_file}`
 
-          if File.exists?(init_file)
-            Chef::Log.error("Fail to restart postgresql using #{init_file}") && (exit 1) unless system("#{init_file} restart")
+        # restart postgrsql
+        init_file = "#{File.join("", "etc", "init.d", "postgresql-#{pg_major_version}")}"
+        backup_init_file = "#{File.join("", "etc", "init.d", "postgresql90")}"
+
+        if File.exists?(init_file)
+          Chef::Log.error("Fail to restart postgresql using #{init_file}") && (exit 1) unless system("#{init_file} restart")
+        else
+          if File.exists?(backup_init_file)
+            Chef::Log.error("Fail to restart postgresql using #{backup_init_file}") && (exit 1) unless system("#{backup_init_file} restart #{pg_major_version}")
           else
-            if File.exists?(backup_init_file)
-              Chef::Log.error("Fail to restart postgresql using #{backup_init_file}") && (exit 1) unless system("#{backup_init_file} restart #{pg_major_version}")
-            else
-              Chef::Log.error("Installation of PostgreSQL maybe failed, could not find init script")
-              exit 1
-            end
+            Chef::Log.error("Installation of PostgreSQL maybe failed, could not find init script")
+            exit 1
           end
         end
       end
-    else
-      Chef::Log.error("PostgreSQL config update is not supported on this platform.")
     end
   end
 end

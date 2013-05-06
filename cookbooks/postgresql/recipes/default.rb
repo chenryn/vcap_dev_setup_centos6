@@ -50,6 +50,17 @@ when "ubuntu"
     EOH
   end
 
+when "centos"
+  bash "Install pgdg repos from postgresql" do
+    code <<-EOH
+    rpm -ivh 'http://yum.postgresql.org/9.0/redhat/rhel-6-x86_64/pgdg-centos90-9.0-5.noarch.rpm'
+    EOH
+  end
+
+  %w[postgresql90 postgresql90-server].each do |pkg|
+    package pkg
+  end
+
 else
   Chef::Log.error("Installation of PostgreSQL is not supported on this platform.")
 end
